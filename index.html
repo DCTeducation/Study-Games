@@ -1,0 +1,279 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+  <title>Flap Study</title>
+  <style>
+    :root{
+      --bg:#0b1220;
+      --panel:#0f172a;
+      --text:#e5e7eb;
+      --muted:#94a3b8;
+      --accent:#38bdf8;
+      --good:#22c55e;
+      --bad:#ef4444;
+    }
+    *{ box-sizing:border-box; }
+    body{
+      margin:0; height:100vh; display:grid; place-items:center;
+      background: radial-gradient(1200px 600px at 50% 20%, #13214a 0%, var(--bg) 55%, #060a14 100%);
+      color:var(--text); font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+    }
+    .wrap{
+      width:min(420px, 92vw);
+      display:grid; gap:10px;
+    }
+    .topbar{
+      display:flex; justify-content:space-between; align-items:center;
+      padding:10px 12px; border:1px solid rgba(255,255,255,.08);
+      border-radius:14px; background: rgba(15,23,42,.55);
+      backdrop-filter: blur(8px);
+    }
+    .brand{ font-weight:700; letter-spacing:.2px; }
+    .hint{ color:var(--muted); font-size:12px; }
+    canvas{
+      width:100%; aspect-ratio: 3/4;
+      border-radius:18px;
+      border:1px solid rgba(255,255,255,.10);
+      background: linear-gradient(#0ea5e9 0%, #1e293b 55%, #0b1220 100%);
+      display:block;
+    }
+    .footer{
+      color:var(--muted);
+      font-size:12px;
+      text-align:center;
+      padding-bottom:6px;
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="topbar">
+      <div class="brand">Flap Study</div>
+      <div class="hint">Space / Click / Tap to flap • R to restart</div>
+    </div>
+    <canvas id="c" width="360" height="480"></canvas>
+    <div class="footer">Step 1: Base game. Next we add “death → question → revive”.</div>
+  </div>
+
+  <script>
+    const canvas = document.getElementById('c');
+    const ctx = canvas.getContext('2d');
+
+    // --- Game constants
+    const W = canvas.width, H = canvas.height;
+    const gravity = 0.38;
+    const flapVel = -6.8;
+
+    const pipeGap = 130;
+    const pipeW = 56;
+    const pipeSpeed = 2.2;
+    const pipeEvery = 95; // frames
+
+    // --- Game state
+    let running = false;
+    let gameOver = false;
+    let score = 0;
+    let best = Number(localStorage.getItem('flap_best') || 0);
+
+    const bird = {
+      x: 90,
+      y: H/2,
+      r: 10,
+      vy: 0
+    };
+
+    let pipes = [];
+    let frame = 0;
+
+    function reset(){
+      running = false;
+      gameOver = false;
+      score = 0;
+      frame = 0;
+      bird.x = 90;
+      bird.y = H/2;
+      bird.vy = 0;
+      pipes = [];
+      spawnPipe();
+      draw(); // show start screen
+    }
+
+    function spawnPipe(){
+      // top pipe height between 40 and H - gap - 80
+      const topH = Math.floor(40 + Math.random() * (H - pipeGap - 120));
+      pipes.push({
+        x: W + 20,
+        topH,
+        passed: false
+      });
+    }
+
+    function flap(){
+      if (gameOver) return;
+      if (!running) running = true;
+      bird.vy = flapVel;
+    }
+
+    function die(){
+      gameOver = true;
+      running = false;
+      best = Math.max(best, score);
+      localStorage.setItem('flap_best', String(best));
+    }
+
+    function rectCircleCollide(rx, ry, rw, rh, cx, cy, cr){
+      const closestX = Math.max(rx, Math.min(cx, rx + rw));
+      const closestY = Math.max(ry, Math.min(cy, ry + rh));
+      const dx = cx - closestX;
+      const dy = cy - closestY;
+      return (dx*dx + dy*dy) <= cr*cr;
+    }
+
+    function update(){
+      if (!running || gameOver) return;
+
+      frame++;
+
+      // bird physics
+      bird.vy += gravity;
+      bird.y += bird.vy;
+
+      // spawn pipes
+      if (frame % pipeEvery === 0) spawnPipe();
+
+      // move pipes
+      for (const p of pipes) p.x -= pipeSpeed;
+
+      // remove offscreen
+      pipes = pipes.filter(p => p.x + pipeW > -10);
+
+      // scoring
+      for (const p of pipes){
+        if (!p.passed && p.x + pipeW < bird.x){
+          p.passed = true;
+          score++;
+        }
+      }
+
+      // collisions with ground/ceiling
+      if (bird.y - bird.r < 0) { bird.y = bird.r; bird.vy = 0; }
+      if (bird.y + bird.r > H) { die(); }
+
+      // collisions with pipes
+      for (const p of pipes){
+        const topRect = { x: p.x, y: 0, w: pipeW, h: p.topH };
+        const botRect = { x: p.x, y: p.topH + pipeGap, w: pipeW, h: H - (p.topH + pipeGap) };
+
+        if (
+          rectCircleCollide(topRect.x, topRect.y, topRect.w, topRect.h, bird.x, bird.y, bird.r) ||
+          rectCircleCollide(botRect.x, botRect.y, botRect.w, botRect.h, bird.x, bird.y, bird.r)
+        ){
+          die();
+          break;
+        }
+      }
+    }
+
+    function draw(){
+      // background
+      ctx.clearRect(0,0,W,H);
+
+      // subtle stars
+      ctx.globalAlpha = 0.25;
+      for (let i=0;i<30;i++){
+        const x = (i*97 + frame*0.3) % W;
+        const y = (i*53) % H;
+        ctx.fillStyle = "#fff";
+        ctx.fillRect(x, y, 1, 1);
+      }
+      ctx.globalAlpha = 1;
+
+      // pipes
+      for (const p of pipes){
+        // top
+        ctx.fillStyle = "rgba(15,23,42,.95)";
+        ctx.fillRect(p.x, 0, pipeW, p.topH);
+        // bottom
+        ctx.fillRect(p.x, p.topH + pipeGap, pipeW, H - (p.topH + pipeGap));
+
+        // lip
+        ctx.fillStyle = "rgba(56,189,248,.25)";
+        ctx.fillRect(p.x, p.topH - 6, pipeW, 6);
+        ctx.fillRect(p.x, p.topH + pipeGap, pipeW, 6);
+      }
+
+      // bird
+      ctx.beginPath();
+      ctx.arc(bird.x, bird.y, bird.r, 0, Math.PI*2);
+      ctx.fillStyle = "#e5e7eb";
+      ctx.fill();
+
+      // UI
+      ctx.fillStyle = "rgba(0,0,0,.35)";
+      ctx.fillRect(10, 10, 150, 40);
+      ctx.fillStyle = "#e5e7eb";
+      ctx.font = "bold 16px system-ui";
+      ctx.fillText(`Score: ${score}`, 18, 35);
+      ctx.font = "12px system-ui";
+      ctx.fillStyle = "rgba(229,231,235,.75)";
+      ctx.fillText(`Best: ${best}`, 18, 52);
+
+      if (!running && !gameOver){
+        ctx.fillStyle = "rgba(0,0,0,.45)";
+        ctx.fillRect(0, 0, W, H);
+
+        ctx.fillStyle = "#e5e7eb";
+        ctx.font = "bold 18px system-ui";
+        ctx.textAlign = "center";
+        ctx.fillText("Click / Tap / Space to start", W/2, H/2 - 10);
+
+        ctx.font = "12px system-ui";
+        ctx.fillStyle = "rgba(229,231,235,.75)";
+        ctx.fillText("Don’t worry—studying starts after death 😈", W/2, H/2 + 16);
+
+        ctx.textAlign = "left";
+      }
+
+      if (gameOver){
+        ctx.fillStyle = "rgba(0,0,0,.55)";
+        ctx.fillRect(0, 0, W, H);
+
+        ctx.fillStyle = "#e5e7eb";
+        ctx.font = "bold 22px system-ui";
+        ctx.textAlign = "center";
+        ctx.fillText("You died.", W/2, H/2 - 24);
+
+        ctx.font = "14px system-ui";
+        ctx.fillStyle = "rgba(229,231,235,.85)";
+        ctx.fillText(`Score: ${score}  •  Best: ${best}`, W/2, H/2 + 2);
+
+        ctx.font = "12px system-ui";
+        ctx.fillStyle = "rgba(229,231,235,.75)";
+        ctx.fillText("Press R to restart", W/2, H/2 + 26);
+
+        ctx.textAlign = "left";
+      }
+    }
+
+    function loop(){
+      update();
+      draw();
+      requestAnimationFrame(loop);
+    }
+
+    // controls
+    window.addEventListener('keydown', (e) => {
+      if (e.code === 'Space') { e.preventDefault(); flap(); }
+      if (e.key.toLowerCase() === 'r') reset();
+    });
+
+    canvas.addEventListener('mousedown', flap);
+    canvas.addEventListener('touchstart', (e) => { e.preventDefault(); flap(); }, {passive:false});
+
+    reset();
+    loop();
+  </script>
+</body>
+</html>
